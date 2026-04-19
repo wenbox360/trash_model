@@ -1900,7 +1900,10 @@ def data_generator(dataset, config, shuffle=True, augmentation=None,
                 if outputs:
                     yield inputs, outputs
                 else:
-                    yield inputs
+                    # Keras data adapters expect one of: x, (x,), (x, y), or
+                    # (x, y, sample_weight). Wrap x to avoid unpacking the
+                    # multiple model inputs as a top-level tuple.
+                    yield (inputs,)
 
                 # start a new batch
                 b = 0
