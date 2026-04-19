@@ -2022,14 +2022,14 @@ class MaskRCNN():
 
         # Anchors
         if mode == "training":
-            anchors = self.get_anchors(config.IMAGE_SHAPE)
+            anchors_np = self.get_anchors(config.IMAGE_SHAPE)
             # Duplicate across the batch dimension because Keras requires it
             # TODO: can this be optimized to avoid duplicating the anchors?
-            anchors = np.broadcast_to(anchors, (config.BATCH_SIZE,) + anchors.shape)
+            anchors_np = np.broadcast_to(anchors_np, (config.BATCH_SIZE,) + anchors_np.shape)
             # Keep anchors as a graph constant; creating Variables in Lambda
             # is disallowed by newer Keras versions.
             anchors = KL.Lambda(
-                lambda x: tf.constant(anchors, dtype=dtype),
+                lambda x, anchors_const=anchors_np: tf.constant(anchors_const, dtype=dtype),
                 name="anchors"
             )(input_image)
         else:
@@ -2454,7 +2454,7 @@ class MaskRCNN():
         # Callbacks
         callbacks = [
             keras.callbacks.TensorBoard(log_dir=self.log_dir,
-                                        histogram_freq=0, write_graph=True, write_images=False),
+                                        histogram_freq=0, write_graph=False, write_images=False),
             keras.callbacks.ModelCheckpoint(self.checkpoint_path,
                                             verbose=0, save_weights_only=True),
         ]
