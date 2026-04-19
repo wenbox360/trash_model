@@ -2208,6 +2208,31 @@ class MaskRCNN():
     #  Weights Loading Functions
     ############################################################
 
+    def _extract_checkpoint_epoch(self, checkpoint_path):
+        """Extract epoch number from a checkpoint filename if present."""
+        filename = os.path.basename(checkpoint_path)
+        match = re.search(r"_(\d{4})(?:\.weights)?\.h5$", filename)
+        return int(match.group(1)) if match else None
+
+    def _select_latest_checkpoint(self, checkpoint_dir, checkpoints):
+        """Select latest checkpoint, preferring numbered epoch checkpoints."""
+        checkpoints = [f for f in checkpoints if f.startswith("mask_rcnn")]
+        if not checkpoints:
+            return None
+
+        epoch_checkpoints = []
+        for filename in checkpoints:
+            epoch = self._extract_checkpoint_epoch(filename)
+            if epoch is not None:
+                epoch_checkpoints.append((epoch, filename))
+
+        if epoch_checkpoints:
+            epoch_checkpoints = sorted(epoch_checkpoints, key=lambda item: item[0])
+            return os.path.join(checkpoint_dir, epoch_checkpoints[-1][1])
+
+        checkpoints = sorted(checkpoints)
+        return os.path.join(checkpoint_dir, checkpoints[-1])
+
     def get_last_checkpoint(self, model_name):
         """Finds the last checkpoint file of a selected trained model in the
                 model directory.
@@ -2231,12 +2256,9 @@ class MaskRCNN():
 
         model_path = os.path.join(self.model_dir, model_name)
         checkpoints = next(os.walk(model_path))[2]
-        checkpoints = filter(lambda f: f.startswith("mask_rcnn_taco"), checkpoints)
-        checkpoints = sorted(checkpoints)
-
-        if not checkpoints:
+        checkpoint = self._select_latest_checkpoint(model_path, checkpoints)
+        if checkpoint is None:
             return model_path, None
-        checkpoint = os.path.join(model_path, checkpoints[-1])
 
         return model_path, checkpoint
 
@@ -2261,11 +2283,9 @@ class MaskRCNN():
         dir_name = os.path.join(self.model_dir, dir_names[-1])
         # Find the last checkpoint
         checkpoints = next(os.walk(dir_name))[2]
-        checkpoints = filter(lambda f: f.startswith("mask_rcnn"), checkpoints)
-        checkpoints = sorted(checkpoints)
-        if not checkpoints:
+        checkpoint = self._select_latest_checkpoint(dir_name, checkpoints)
+        if checkpoint is None:
             return dir_name, None
-        checkpoint = os.path.join(dir_name, checkpoints[-1])
 
         return dir_name, checkpoint
 
@@ -2421,7 +2441,15 @@ class MaskRCNN():
         if model_path:
             # Directory for training logs
             self.log_dir = os.path.dirname(model_path)
-            self.epoch = int(model_path[-6:-3])
+            inferred_epoch = self._extract_checkpoint_epoch(model_path)
+            if inferred_epoch is not None:
+                self.epoch = inferred_epoch
+            else:
+                # Fallback for non-numbered checkpoints (e.g. latest/best).
+                checkpoints = next(os.walk(self.log_dir))[2] if os.path.isdir(self.log_dir) else []
+                checkpoint = self._select_latest_checkpoint(self.log_dir, checkpoints)
+                inferred_epoch = self._extract_checkpoint_epoch(checkpoint) if checkpoint else None
+                self.epoch = inferred_epoch if inferred_epoch is not None else 0
         else:
             self.epoch = 0
             now = datetime.datetime.now()
@@ -2429,10 +2457,13 @@ class MaskRCNN():
                 self.config.NAME.lower(), now))
 
         # Path to save after each epoch. Include placeholders that get filled by Keras.
-        self.checkpoint_path = os.path.join(self.log_dir, "mask_rcnn_{}_*epoch*.h5".format(
-            self.config.NAME.lower()))
-        self.checkpoint_path = self.checkpoint_path.replace(
-            "*epoch*", "{epoch:04d}")
+        checkpoint_prefix = "mask_rcnn_{}".format(self.config.NAME.lower())
+        self.checkpoint_path = os.path.join(self.log_dir, "{}_{{epoch:04d}}.h5".format(
+            checkpoint_prefix))
+        self.checkpoint_latest_path = os.path.join(
+            self.log_dir, "{}_latest.h5".format(checkpoint_prefix))
+        self.checkpoint_best_path = os.path.join(
+            self.log_dir, "{}_best.h5".format(checkpoint_prefix))
 
     def train(self, train_dataset, val_dataset, learning_rate, epochs, layers,
               augmentation=None):
@@ -2486,17 +2517,51 @@ class MaskRCNN():
         val_generator = data_generator(val_dataset, self.config, shuffle=True,
                                        batch_size=self.config.BATCH_SIZE)
 
+        os.makedirs(self.log_dir, exist_ok=True)
+
+        checkpoint_verbose = int(getattr(self.config, "TRAIN_CHECKPOINT_VERBOSE", 0))
+        checkpoint_monitor = str(getattr(self.config, "TRAIN_CHECKPOINT_MONITOR", "val_loss"))
+        checkpoint_mode = str(getattr(self.config, "TRAIN_CHECKPOINT_MODE", "min"))
+        save_epoch_checkpoints = bool(getattr(self.config, "TRAIN_CHECKPOINT_SAVE_EACH_EPOCH", True))
+        save_latest_checkpoint = bool(getattr(self.config, "TRAIN_CHECKPOINT_SAVE_LATEST", True))
+        save_best_checkpoint = bool(getattr(self.config, "TRAIN_CHECKPOINT_SAVE_BEST", True))
+
         # Callbacks
-        callbacks = [
-            keras.callbacks.TensorBoard(log_dir=self.log_dir,
-                                        histogram_freq=0, write_graph=False, write_images=False),
-            keras.callbacks.ModelCheckpoint(self.checkpoint_path,
-                                            verbose=0, save_weights_only=True),
-        ]
+        callbacks = [keras.callbacks.TensorBoard(log_dir=self.log_dir,
+                                                 histogram_freq=0, write_graph=False, write_images=False)]
+        if save_epoch_checkpoints:
+            callbacks.append(keras.callbacks.ModelCheckpoint(
+                self.checkpoint_path,
+                verbose=checkpoint_verbose,
+                save_weights_only=True,
+                save_freq="epoch",
+            ))
+        if save_latest_checkpoint:
+            callbacks.append(keras.callbacks.ModelCheckpoint(
+                self.checkpoint_latest_path,
+                verbose=0,
+                save_weights_only=True,
+                save_freq="epoch",
+            ))
+        if save_best_checkpoint:
+            callbacks.append(keras.callbacks.ModelCheckpoint(
+                self.checkpoint_best_path,
+                monitor=checkpoint_monitor,
+                mode=checkpoint_mode,
+                save_best_only=True,
+                verbose=checkpoint_verbose,
+                save_weights_only=True,
+                save_freq="epoch",
+            ))
 
         # Train
         log("\nStarting at epoch {}. LR={}\n".format(self.epoch, learning_rate))
-        log("Checkpoint Path: {}".format(self.checkpoint_path))
+        if save_epoch_checkpoints:
+            log("Checkpoint Path (epoch): {}".format(self.checkpoint_path))
+        if save_latest_checkpoint:
+            log("Checkpoint Path (latest): {}".format(self.checkpoint_latest_path))
+        if save_best_checkpoint:
+            log("Checkpoint Path (best): {}".format(self.checkpoint_best_path))
         self.set_trainable(layers)
         self.compile(learning_rate, self.config.LEARNING_MOMENTUM)
 
