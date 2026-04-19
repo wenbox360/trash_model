@@ -452,8 +452,14 @@ class PyramidROIAlign(KE.Layer):
         ix = tf.gather(box_to_level[:, 2], ix)
         pooled = tf.gather(pooled, ix)
 
-        # Re-add the batch dimension
-        pooled = tf.expand_dims(pooled, 0)
+        # Restore pooled tensor to [batch, num_boxes, pool_h, pool_w, channels].
+        pooled = tf.reshape(
+            pooled,
+            tf.concat([
+                tf.shape(boxes)[:2],
+                tf.shape(pooled)[1:]
+            ], axis=0)
+        )
         return pooled
 
     def compute_output_shape(self, input_shape):
@@ -683,7 +689,7 @@ class DetectionTargetLayer(KE.Layer):
     def compute_output_shape(self, input_shape):
         return [
             (None, self.config.TRAIN_ROIS_PER_IMAGE, 4),  # rois
-            (None, 1),  # class_ids
+            (None, self.config.TRAIN_ROIS_PER_IMAGE),  # class_ids
             (None, self.config.TRAIN_ROIS_PER_IMAGE, 4),  # deltas
             (None, self.config.TRAIN_ROIS_PER_IMAGE, self.config.MASK_SHAPE[0],
              self.config.MASK_SHAPE[1])  # masks
@@ -1146,10 +1152,18 @@ def mrcnn_class_loss_graph(target_class_ids, pred_class_logits,
     target_class_ids = tf.cast(target_class_ids, 'int64')
 
     # Find predictions of classes that are not in the dataset.
-    pred_class_ids = tf.argmax(pred_class_logits, axis=2)
-    # TODO: Update this line to work with batch > 1. Right now it assumes all
-    #       images in a batch have the same active_class_ids
-    pred_active = tf.gather(active_class_ids[0], pred_class_ids)
+    pred_class_ids = tf.argmax(pred_class_logits, axis=2, output_type=tf.int32)
+
+    # Gather active class flags per ROI and per image in the batch.
+    batch_ids = tf.tile(
+        tf.expand_dims(tf.range(tf.shape(pred_class_ids)[0]), 1),
+        [1, tf.shape(pred_class_ids)[1]]
+    )
+    pred_active = tf.gather_nd(
+        active_class_ids,
+        tf.stack([batch_ids, pred_class_ids], axis=2)
+    )
+    pred_active = tf.cast(pred_active, pred_class_logits.dtype)
 
     # Loss
     loss = tf.nn.sparse_softmax_cross_entropy_with_logits(
@@ -1161,7 +1175,7 @@ def mrcnn_class_loss_graph(target_class_ids, pred_class_logits,
 
     # Computer loss mean. Use only predictions that contribute
     # to the loss to get a correct mean.
-    loss = tf.reduce_sum(loss) / tf.reduce_sum(pred_active)
+    loss = tf.math.divide_no_nan(tf.reduce_sum(loss), tf.reduce_sum(pred_active))
     return loss
 
 
