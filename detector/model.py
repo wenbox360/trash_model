@@ -2334,14 +2334,11 @@ class MaskRCNN():
         if not losses_initialized:
             # Add metrics for losses
             for name in loss_names:
-                if name in self.keras_model.metrics_names:
-                    continue
                 layer = self.keras_model.get_layer(name)
-                self.keras_model.metrics_names.append(name)
                 loss = (
                     tf.reduce_mean(layer.output, keepdims=True)
                     * self.config.LOSS_WEIGHTS.get(name, 1.))
-                self.keras_model.metrics_tensors.append(loss)
+                self.keras_model.add_metric(loss, name=name, aggregation='mean')
 
             self._losses_initialized = True
 
@@ -2482,7 +2479,7 @@ class MaskRCNN():
         else:
             workers = multiprocessing.cpu_count()
 
-        self.keras_model.fit_generator(
+        self.keras_model.fit(
             train_generator,
             initial_epoch=self.epoch,
             epochs=epochs,
