@@ -37,7 +37,13 @@ class Taco(utils.Dataset):
         else:
             ann_filepath += ".json"
 
-        assert os.path.isfile(ann_filepath)
+        if not os.path.isfile(ann_filepath):
+            raise FileNotFoundError(
+                "Annotation file not found: {}. "
+                "Training/validation expects split files like annotations_<round>_<subset>.json. "
+                "Generate them first with: python split_dataset.py --dataset_dir {}"
+                .format(ann_filepath, dataset_dir)
+            )
 
         # Load dataset
         dataset = json.load(open(ann_filepath, 'r'))

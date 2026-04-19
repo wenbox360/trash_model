@@ -24,17 +24,18 @@ import multiprocessing
 import numpy as np
 import skimage.transform
 import tensorflow as tf
-import keras
-import keras.backend as K
-import keras.layers as KL
-import keras.engine as KE
-import keras.models as KM
+from tensorflow import keras
+from tensorflow.keras import backend as K
+from tensorflow.keras import layers as KL
+from tensorflow.keras import models as KM
 import utils
+
+# Keep legacy alias expected by custom layers below.
+KE = KL
 
 # Requires TensorFlow 1.3+ and Keras 2.0.8+.
 from distutils.version import LooseVersion
 assert LooseVersion(tf.__version__) >= LooseVersion("1.3")
-assert LooseVersion(keras.__version__) >= LooseVersion('2.0.8')
 
 
 ############################################################
@@ -345,7 +346,7 @@ class ProposalLayer(KE.Layer):
 def log2_graph(x):
     tensor_dtype = tf.float16 if K.floatx() != 'float32' else tf.float32
     """Implementatin of Log2. TF doesn't have a native implemenation."""
-    return tf.log(x) / tf.log(tf.constant(2.0, dtype=tensor_dtype))
+    return tf.math.log(x) / tf.math.log(tf.constant(2.0, dtype=tensor_dtype))
 
 
 class PyramidROIAlign(KE.Layer):
@@ -563,12 +564,12 @@ def detection_targets_graph(proposals, gt_class_ids, gt_boxes, gt_masks, config)
     # Positive ROIs
     positive_count = int(config.TRAIN_ROIS_PER_IMAGE *
                          config.ROI_POSITIVE_RATIO)
-    positive_indices = tf.random_shuffle(positive_indices)[:positive_count]
+    positive_indices = tf.random.shuffle(positive_indices)[:positive_count]
     positive_count = tf.shape(positive_indices)[0]
     # Negative ROIs. Add enough to maintain positive:negative ratio.
     r = 1.0 / config.ROI_POSITIVE_RATIO
     negative_count = tf.cast(r * tf.cast(positive_count, tensor_ftype), tf.int32) - positive_count
-    negative_indices = tf.random_shuffle(negative_indices)[:negative_count]
+    negative_indices = tf.random.shuffle(negative_indices)[:negative_count]
     # Gather selected ROIs
     positive_rois = tf.gather(proposals, positive_indices)
     negative_rois = tf.gather(proposals, negative_indices)
@@ -739,7 +740,7 @@ def refine_detections_graph(rois, probs, deltas, window, config):
             conf_keep = tf.where(class_scores >= config.DETECTION_MIN_CONFIDENCE)[:, 0]
         keep = tf.sets.set_intersection(tf.expand_dims(keep, 0),
                                         tf.expand_dims(conf_keep, 0))
-        keep = tf.sparse_tensor_to_dense(keep)[0]
+        keep = tf.sparse.to_dense(keep)[0]
 
     # Apply NMS
     # 0. Prepare variables
@@ -794,7 +795,7 @@ def refine_detections_graph(rois, probs, deltas, window, config):
     # 2.3. Compute intersection between keep and nms_keep
     keep = tf.sets.set_intersection(tf.expand_dims(keep, 0),
                                     tf.expand_dims(nms_keep, 0))
-    keep = tf.sparse_tensor_to_dense(keep)[0]
+    keep = tf.sparse.to_dense(keep)[0]
 
     # Keep top detections
     roi_count = config.DETECTION_MAX_INSTANCES
@@ -813,7 +814,7 @@ def refine_detections_graph(rois, probs, deltas, window, config):
     # Coordinates are normalized.
     detections = tf.concat([
         tf.gather(refined_rois, keep),
-        tf.to_float(tf.gather(class_ids, keep))[..., tf.newaxis],
+        tf.cast(tf.gather(class_ids, keep), tf.float32)[..., tf.newaxis],
         tf.gather(class_scores, keep)[..., tf.newaxis],
         tf.gather(probs, keep)
         ], axis=1)
@@ -990,8 +991,10 @@ def fpn_classifier_graph(rois, feature_maps, image_meta,
     x = KL.TimeDistributed(KL.Dense(num_classes * 4, activation='linear'),
                            name='mrcnn_bbox_fc')(shared)
     # Reshape to [batch, boxes, num_classes, (dy, dx, log(dh), log(dw))]
-    s = K.int_shape(x)
-    mrcnn_bbox = KL.Reshape((s[1], num_classes, 4), name="mrcnn_bbox")(x)
+    mrcnn_bbox = KL.Lambda(
+        lambda t: tf.reshape(t, (tf.shape(t)[0], tf.shape(t)[1], num_classes, 4)),
+        name="mrcnn_bbox"
+    )(x)
 
     return mrcnn_class_logits, mrcnn_probs, mrcnn_bbox
 
@@ -1326,6 +1329,14 @@ def load_image_gt(dataset, config, image_id, augmentation=None,
     # Augmentation
     # This requires the imgaug lib (https://github.com/aleju/imgaug)
     if augmentation:
+        if not hasattr(np, "sctypes"):
+            np.sctypes = {
+                "int": [np.int8, np.int16, np.int32, np.int64],
+                "uint": [np.uint8, np.uint16, np.uint32, np.uint64],
+                "float": [np.float16, np.float32, np.float64],
+                "complex": [np.complex64, np.complex128],
+                "others": [np.bool_, np.object_, np.str_],
+            }
         import imgaug as ia
 
         # Include here the names of operations which should not be performed on masks
@@ -1959,8 +1970,9 @@ class MaskRCNN():
             input_gt_boxes = KL.Input(
                 shape=[None, 4], name="input_gt_boxes", dtype=dtype)
             # Normalize coordinates
-            gt_boxes = KL.Lambda(lambda x: norm_boxes_graph(
-                x, K.shape(input_image)[1:3]))(input_gt_boxes)
+            gt_boxes = KL.Lambda(
+                lambda x: norm_boxes_graph(x[0], K.shape(x[1])[1:3])
+            )([input_gt_boxes, input_image])
 
             # 3. GT Masks (zero padded)
             # [batch, height, width, MAX_GT_INSTANCES]
@@ -2014,8 +2026,12 @@ class MaskRCNN():
             # Duplicate across the batch dimension because Keras requires it
             # TODO: can this be optimized to avoid duplicating the anchors?
             anchors = np.broadcast_to(anchors, (config.BATCH_SIZE,) + anchors.shape)
-            # A hack to get around Keras's bad support for constants
-            anchors = KL.Lambda(lambda x: tf.Variable(anchors,dtype=dtype), name="anchors")(input_image)
+            # Keep anchors as a graph constant; creating Variables in Lambda
+            # is disallowed by newer Keras versions.
+            anchors = KL.Lambda(
+                lambda x: tf.constant(anchors, dtype=dtype),
+                name="anchors"
+            )(input_image)
         else:
             anchors = input_anchors
 
@@ -2060,8 +2076,9 @@ class MaskRCNN():
                 input_rois = KL.Input(shape=[config.POST_NMS_ROIS_TRAINING, 4],
                                       name="input_roi", dtype=np.int32)
                 # Normalize coordinates
-                target_rois = KL.Lambda(lambda x: norm_boxes_graph(
-                    x, K.shape(input_image)[1:3]))(input_rois)
+                target_rois = KL.Lambda(
+                    lambda x: norm_boxes_graph(x[0], K.shape(x[1])[1:3])
+                )([input_rois, input_image])
             else:
                 target_rois = rpn_rois
 
@@ -2162,9 +2179,19 @@ class MaskRCNN():
                     log_dir: The directory where events and weights are saved
                     checkpoint_path: the path to the last checkpoint file
                 """
-        dir_names = next(os.walk(self.model_dir))[1]
+        if not os.path.isdir(self.model_dir):
+            raise FileNotFoundError(
+                "Model directory does not exist: {}. "
+                "Use --model=coco for first training run, or create/train a model first."
+                .format(self.model_dir)
+            )
 
-        assert model_name in dir_names
+        dir_names = next(os.walk(self.model_dir))[1]
+        if model_name not in dir_names:
+            raise FileNotFoundError(
+                "Model '{}' not found in {}. Available models: {}"
+                .format(model_name, self.model_dir, dir_names)
+            )
 
         model_path = os.path.join(self.model_dir, model_name)
         checkpoints = next(os.walk(model_path))[2]
@@ -2184,6 +2211,9 @@ class MaskRCNN():
             log_dir: The directory where events and weights are saved
             checkpoint_path: the path to the last checkpoint file
         """
+        if not os.path.isdir(self.model_dir):
+            return None, None
+
         # Get directory names. Each directory corresponds to a model
         dir_names = next(os.walk(self.model_dir))[1]
         key = self.config.NAME.lower()
@@ -2210,7 +2240,7 @@ class MaskRCNN():
         exlude: list of layer names to excluce
         """
         import h5py
-        from keras.engine import topology
+        from tensorflow.python.keras.saving import hdf5_format
 
         if exclude:
             by_name = True
@@ -2232,9 +2262,9 @@ class MaskRCNN():
             layers = filter(lambda l: l.name not in exclude, layers)
 
         if by_name:
-            topology.load_weights_from_hdf5_group_by_name(f, layers)
+            hdf5_format.load_weights_from_hdf5_group_by_name(f, layers)
         else:
-            topology.load_weights_from_hdf5_group(f, layers)
+            hdf5_format.load_weights_from_hdf5_group(f, layers)
         if hasattr(f, 'close'):
             f.close()
         # Update the log directory
@@ -2244,7 +2274,7 @@ class MaskRCNN():
         """Downloads ImageNet trained weights from Keras.
         Returns path to weights file.
         """
-        from keras.utils.data_utils import get_file
+        from tensorflow.keras.utils import get_file
         TF_WEIGHTS_PATH_NO_TOP = 'https://github.com/fchollet/deep-learning-models/'\
                                  'releases/download/v0.2/'\
                                  'resnet50_weights_tf_dim_ordering_tf_kernels_notop.h5'
@@ -2440,7 +2470,7 @@ class MaskRCNN():
         # Work-around for Windows: Keras fails on Windows when using
         # multiprocessing workers. See discussion here:
         # https://github.com/matterport/Mask_RCNN/issues/13#issuecomment-353124009
-        if os.name is 'nt':
+        if os.name == 'nt':
             workers = 0
         else:
             workers = multiprocessing.cpu_count()

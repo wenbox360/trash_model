@@ -43,6 +43,17 @@ import numpy as np
 import json
 import csv
 import random
+
+# imgaug expects np.sctypes, which was removed in NumPy 2.0.
+if not hasattr(np, "sctypes"):
+    np.sctypes = {
+        "int": [np.int8, np.int16, np.int32, np.int64],
+        "uint": [np.uint8, np.uint16, np.uint32, np.uint64],
+        "float": [np.float16, np.float32, np.float64],
+        "complex": [np.complex64, np.complex128],
+        "others": [np.bool_, np.object_, np.str_],
+    }
+
 from imgaug import augmenters as iaa
 
 from dataset import Taco
@@ -282,11 +293,22 @@ if __name__ == '__main__':
     elif args.model.lower() == "last":
         # Find last trained weights
         model_path = model.find_last()[1]
+        if model_path is None:
+            raise FileNotFoundError(
+                "No previous checkpoints found under {}. "
+                "Use --model=coco for the first training run."
+                .format(DEFAULT_LOGS_DIR)
+            )
     elif args.model.lower() == "imagenet":
         # Start from ImageNet trained weights
         model_path = model.get_imagenet_weights()
     else:
         _, model_path = model.get_last_checkpoint(args.model)
+        if model_path is None:
+            raise FileNotFoundError(
+                "No checkpoint files found for model '{}'."
+                .format(args.model)
+            )
 
     # Load weights
     if args.model.lower() == "coco":

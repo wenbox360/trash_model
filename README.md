@@ -95,3 +95,4 @@ As you can see [here](http://tacodataset.org/stats), most of the original classe
 
 <p align="center">
 <img src="https://raw.githubusercontent.com/wiki/pedropro/TACO/images/teaser.gif" width="75%"/></p>
+# trash_model

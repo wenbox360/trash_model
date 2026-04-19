@@ -1,7 +1,14 @@
 pillow
 requests
 jupyter
-numpy
+numpy<2
+tensorflow==2.15.1
+keras<3
+h5py
+scipy
+scikit-image
+imgaug
+pycocotools
 pandas
 matplotlib
 seaborn
