@@ -2332,14 +2332,8 @@ class MaskRCNN():
             loss=[None] * len(self.keras_model.outputs))
 
         if not losses_initialized:
-            # Add metrics for losses
-            for name in loss_names:
-                layer = self.keras_model.get_layer(name)
-                loss = (
-                    tf.reduce_mean(layer.output, keepdims=True)
-                    * self.config.LOSS_WEIGHTS.get(name, 1.))
-                self.keras_model.add_metric(loss, name=name, aggregation='mean')
-
+            # Keras 2.15 can fail on add_metric() for this legacy graph model
+            # due to trackable ListWrapper hashing. Skip custom symbolic metrics.
             self._losses_initialized = True
 
     def set_trainable(self, layer_regex, keras_model=None, indent=0, verbose=1):
