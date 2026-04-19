@@ -2565,10 +2565,18 @@ class MaskRCNN():
         self.set_trainable(layers)
         self.compile(learning_rate, self.config.LEARNING_MOMENTUM)
 
-        # Conservative input-pipeline defaults avoid RAM spikes and Linux
-        # OOM kills (process terminates with just "Killed").
+        # Input-pipeline settings.
         max_queue_size = max(1, int(getattr(self.config, "TRAIN_MAX_QUEUE_SIZE", 2)))
-        workers = max(1, int(getattr(self.config, "TRAIN_GENERATOR_WORKERS", 1)))
+        workers_override = getattr(self.config, "TRAIN_GENERATOR_WORKERS", None)
+        workers_percent = getattr(self.config, "TRAIN_GENERATOR_WORKERS_PERCENT", None)
+        if workers_percent is not None:
+            workers_percent = max(1.0, min(100.0, float(workers_percent)))
+            cpu_cores = max(1, int(multiprocessing.cpu_count()))
+            workers = max(1, int(math.ceil(cpu_cores * (workers_percent / 100.0))))
+        elif workers_override is not None:
+            workers = max(1, int(workers_override))
+        else:
+            workers = max(1, int(multiprocessing.cpu_count()))
         use_multiprocessing = bool(getattr(self.config, "TRAIN_USE_MULTIPROCESSING", False))
 
         # Windows multiprocessing can be unstable in some environments.

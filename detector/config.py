@@ -213,7 +213,12 @@ class Config(object):
     # Aggressive defaults to maximize input throughput.
     # Reduce these values if you see host RAM pressure.
     TRAIN_MAX_QUEUE_SIZE = 32
-    TRAIN_GENERATOR_WORKERS = 8
+    # Optional absolute worker override.
+    # Set to an int to force a fixed worker count.
+    TRAIN_GENERATOR_WORKERS = None
+    # Percent of logical CPU cores to use for workers.
+    # Set to None to use TRAIN_GENERATOR_WORKERS instead.
+    TRAIN_GENERATOR_WORKERS_PERCENT = 100
     TRAIN_USE_MULTIPROCESSING = True
     # If True, allows multiprocessing workers on Windows too.
     # Keep this False only if your environment shows instability.
