@@ -80,7 +80,23 @@ DEFAULT_LOGS_DIR = os.path.join(ROOT_DIR, "logs")
 #  Testing functions
 ############################################################
 
-def test_dataset(model, dataset, nr_images):
+def test_dataset(model, dataset, nr_images, output_dir=None):
+
+    backend = plt.get_backend().lower()
+    non_interactive_backend = backend.endswith("agg") or "agg" in backend
+
+    if non_interactive_backend and not output_dir:
+        output_dir = os.path.join(DEFAULT_LOGS_DIR, "test_predictions")
+
+    if output_dir:
+        os.makedirs(output_dir, exist_ok=True)
+
+    if non_interactive_backend:
+        print("Non-interactive matplotlib backend '{}' detected.".format(plt.get_backend()))
+        if output_dir:
+            print("Saving test visualizations to: {}".format(output_dir))
+        else:
+            print("No output directory configured; figures will not be shown.")
 
     for i in range(nr_images):
 
@@ -92,7 +108,7 @@ def test_dataset(model, dataset, nr_images):
 
         r = model.detect([image], verbose=0)[0]
 
-        print(r['class_ids'].shape)
+        print("image_id={} detections={}".format(info.get("id", image_id), r['class_ids'].shape[0]))
         if r['class_ids'].shape[0]>0:
             r_fused = utils.fuse_instances(r)
         else:
@@ -110,8 +126,18 @@ def test_dataset(model, dataset, nr_images):
         # # Display ground truth
         visualize.display_instances(image, gt_bbox, gt_mask, gt_class_id, dataset.class_names, title="GT", ax=ax3)
 
-        # Voilà
-        plt.show()
+        if output_dir:
+            output_path = os.path.join(
+                output_dir,
+                "test_{:04d}_image_{}.png".format(i, info.get("id", image_id))
+            )
+            fig.savefig(output_path, bbox_inches="tight", dpi=120)
+
+        if not non_interactive_backend:
+            # Interactive backend: display figures as before.
+            plt.show()
+
+        plt.close(fig)
 
 ############################################################
 #  COCO Evaluation
@@ -226,6 +252,8 @@ if __name__ == '__main__':
     parser.set_defaults(aug=False, early_stop=True)
     parser.add_argument('--use_transplants', required=False, default=None, help='Path to transplanted dataset')
     parser.add_argument('--class_map', required=True, metavar="/path/file.csv", help=' Target classes')
+    parser.add_argument('--test_output_dir', required=False, default=None,
+                        help='Directory to save test visualizations (auto-set for headless backends)')
 
     args = parser.parse_args()
     print("Command: ", args.command)
@@ -416,7 +444,7 @@ if __name__ == '__main__':
         # evaluate_coco(model, dataset_test_binary, taco_binary, "segm", limit=0)
 
     elif args.command == "test":
-        test_dataset(model, dataset_test, len(dataset_test.image_ids))
+        test_dataset(model, dataset_test, len(dataset_test.image_ids), output_dir=args.test_output_dir)
     else:
         print("'{}' is not recognized. "
               "Use 'train' or 'evaluate'".format(args.command))
