@@ -1884,15 +1884,31 @@ def data_generator(dataset, config, shuffle=True, augmentation=None,
                           batch_gt_class_ids, batch_gt_boxes, batch_gt_masks]
                 outputs = []
 
+                input_names = [
+                    "input_image",
+                    "input_image_meta",
+                    "input_rpn_match",
+                    "input_rpn_bbox",
+                    "input_gt_class_ids",
+                    "input_gt_boxes",
+                    "input_gt_masks",
+                ]
+
                 if random_rois:
                     inputs.extend([batch_rpn_rois])
+                    input_names.extend(["input_rpn_rois"])
                     if detection_targets:
                         inputs.extend([batch_rois])
+                        input_names.extend(["input_roi"])
                         # Keras requires that output and targets have the same number of dimensions
                         batch_mrcnn_class_ids = np.expand_dims(
                             batch_mrcnn_class_ids, -1)
                         outputs.extend(
                             [batch_mrcnn_class_ids, batch_mrcnn_bbox, batch_mrcnn_mask])
+
+                # Named inputs keep Keras 2.15 from unpacking multi-input x as
+                # a top-level tuple with invalid structure.
+                inputs = {name: value for name, value in zip(input_names, inputs)}
 
                 # Newer Keras expects matching output/target structures.
                 # For the normal training path we optimize via add_loss(),
@@ -1900,10 +1916,7 @@ def data_generator(dataset, config, shuffle=True, augmentation=None,
                 if outputs:
                     yield inputs, outputs
                 else:
-                    # Keras data adapters expect one of: x, (x,), (x, y), or
-                    # (x, y, sample_weight). Wrap x to avoid unpacking the
-                    # multiple model inputs as a top-level tuple.
-                    yield (inputs,)
+                    yield inputs
 
                 # start a new batch
                 b = 0
