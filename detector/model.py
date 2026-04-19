@@ -2571,8 +2571,10 @@ class MaskRCNN():
         workers = max(1, int(getattr(self.config, "TRAIN_GENERATOR_WORKERS", 1)))
         use_multiprocessing = bool(getattr(self.config, "TRAIN_USE_MULTIPROCESSING", False))
 
-        # Work-around for Windows: disable multiprocessing generator workers.
-        if os.name == 'nt' and use_multiprocessing:
+        # Windows multiprocessing can be unstable in some environments.
+        # Keep it configurable so throughput can be increased when stable.
+        allow_windows_mp = bool(getattr(self.config, "TRAIN_ALLOW_WINDOWS_MULTIPROCESSING", False))
+        if os.name == 'nt' and use_multiprocessing and not allow_windows_mp:
             use_multiprocessing = False
 
         self.keras_model.fit(
