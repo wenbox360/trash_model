@@ -2500,13 +2500,15 @@ class MaskRCNN():
         self.set_trainable(layers)
         self.compile(learning_rate, self.config.LEARNING_MOMENTUM)
 
-        # Work-around for Windows: Keras fails on Windows when using
-        # multiprocessing workers. See discussion here:
-        # https://github.com/matterport/Mask_RCNN/issues/13#issuecomment-353124009
-        if os.name == 'nt':
-            workers = 0
-        else:
-            workers = multiprocessing.cpu_count()
+        # Conservative input-pipeline defaults avoid RAM spikes and Linux
+        # OOM kills (process terminates with just "Killed").
+        max_queue_size = max(1, int(getattr(self.config, "TRAIN_MAX_QUEUE_SIZE", 2)))
+        workers = max(1, int(getattr(self.config, "TRAIN_GENERATOR_WORKERS", 1)))
+        use_multiprocessing = bool(getattr(self.config, "TRAIN_USE_MULTIPROCESSING", False))
+
+        # Work-around for Windows: disable multiprocessing generator workers.
+        if os.name == 'nt' and use_multiprocessing:
+            use_multiprocessing = False
 
         self.keras_model.fit(
             train_generator,
@@ -2516,9 +2518,9 @@ class MaskRCNN():
             callbacks=callbacks,
             validation_data=val_generator,
             validation_steps=self.config.VALIDATION_STEPS,
-            max_queue_size=100,
+            max_queue_size=max_queue_size,
             workers=workers,
-            use_multiprocessing=True,
+            use_multiprocessing=use_multiprocessing,
         )
         self.epoch = max(self.epoch, epochs)
 
