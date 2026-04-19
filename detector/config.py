@@ -209,6 +209,23 @@ class Config(object):
     # Gradient norm clipping
     GRADIENT_CLIP_NORM = 5.0
 
+    # Keras generator input-pipeline settings.
+    # Conservative defaults reduce host RAM spikes that can lead to
+    # Linux OOM kills (process exits with just "Killed").
+    TRAIN_MAX_QUEUE_SIZE = 2
+    TRAIN_GENERATOR_WORKERS = 1
+    TRAIN_USE_MULTIPROCESSING = False
+
+    # Checkpoint settings.
+    # Save one checkpoint each epoch, plus rolling "latest" and
+    # "best" checkpoints to simplify resume/recovery workflows.
+    TRAIN_CHECKPOINT_SAVE_EACH_EPOCH = True
+    TRAIN_CHECKPOINT_SAVE_LATEST = True
+    TRAIN_CHECKPOINT_SAVE_BEST = True
+    TRAIN_CHECKPOINT_MONITOR = "val_loss"
+    TRAIN_CHECKPOINT_MODE = "min"
+    TRAIN_CHECKPOINT_VERBOSE = 0
+
     def __init__(self):
         """Set values of computed attributes."""
         # Effective batch size
