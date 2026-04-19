@@ -2311,14 +2311,20 @@ class MaskRCNN():
                     * self.config.LOSS_WEIGHTS.get(name, 1.))
                 self.keras_model.add_loss(loss)
 
-            tensor_dtype = tf.float32
             # Add L2 Regularization
             # Skip gamma and beta weights of batch normalization layers.
-            reg_losses = [
-                keras.regularizers.l2(self.config.WEIGHT_DECAY)(w) / tf.cast(tf.size(w), tensor_dtype)
-                for w in self.keras_model.trainable_weights
-                if 'gamma' not in w.name and 'beta' not in w.name]
-            self.keras_model.add_loss(tf.add_n(reg_losses))
+            def regularization_loss():
+                tensor_dtype = tf.float32
+                reg_losses = [
+                    keras.regularizers.l2(self.config.WEIGHT_DECAY)(w) / tf.cast(tf.size(w), tensor_dtype)
+                    for w in self.keras_model.trainable_weights
+                    if 'gamma' not in w.name and 'beta' not in w.name
+                ]
+                if not reg_losses:
+                    return tf.constant(0.0, dtype=tensor_dtype)
+                return tf.add_n(reg_losses)
+
+            self.keras_model.add_loss(regularization_loss)
 
         # Compile
         self.keras_model.compile(
