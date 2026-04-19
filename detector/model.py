@@ -2348,10 +2348,9 @@ class MaskRCNN():
 
             self.keras_model.add_loss(regularization_loss)
 
-        # Compile
-        self.keras_model.compile(
-            optimizer=optimizer,
-            loss=[None] * len(self.keras_model.outputs))
+        # Compile with optimizer only. This training graph uses losses added
+        # via add_loss(), so explicit output losses would force y targets.
+        self.keras_model.compile(optimizer=optimizer)
 
         if not losses_initialized:
             # Keras 2.15 can fail on add_metric() for this legacy graph model
