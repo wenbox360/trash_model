@@ -703,6 +703,13 @@ class DetectionTargetLayer(KE.Layer):
 #  Detection Layer
 ############################################################
 
+def tf_sets_intersection(a, b):
+    """Compatibility wrapper for TensorFlow set intersection APIs."""
+    intersection_fn = getattr(tf.sets, "intersection", None)
+    if intersection_fn is not None:
+        return intersection_fn(a, b)
+    return tf.sets.set_intersection(a, b)
+
 def refine_detections_graph(rois, probs, deltas, window, config):
     """Refine classified proposals and filter overlaps and return final
     detections.
@@ -744,8 +751,8 @@ def refine_detections_graph(rois, probs, deltas, window, config):
             conf_keep = tf.where(class_ratio_scores > config.DETECTION_MIN_CONFIDENCE)[:, 0]
         else:
             conf_keep = tf.where(class_scores >= config.DETECTION_MIN_CONFIDENCE)[:, 0]
-        keep = tf.sets.set_intersection(tf.expand_dims(keep, 0),
-                                        tf.expand_dims(conf_keep, 0))
+        keep = tf_sets_intersection(tf.expand_dims(keep, 0),
+                                    tf.expand_dims(conf_keep, 0))
         keep = tf.sparse.to_dense(keep)[0]
 
     # Apply NMS
@@ -799,8 +806,8 @@ def refine_detections_graph(rois, probs, deltas, window, config):
     nms_keep = tf.reshape(nms_keep, [-1])
     nms_keep = tf.gather(nms_keep, tf.where(nms_keep > -1)[:, 0])
     # 2.3. Compute intersection between keep and nms_keep
-    keep = tf.sets.set_intersection(tf.expand_dims(keep, 0),
-                                    tf.expand_dims(nms_keep, 0))
+    keep = tf_sets_intersection(tf.expand_dims(keep, 0),
+                                tf.expand_dims(nms_keep, 0))
     keep = tf.sparse.to_dense(keep)[0]
 
     # Keep top detections
