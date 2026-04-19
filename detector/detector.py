@@ -214,8 +214,16 @@ if __name__ == '__main__':
     parser.add_argument('--dataset', required=True, metavar="/path/dir", help='Directory of the dataset')
     parser.add_argument('--round', required=True, type=int, help='Split number')
     parser.add_argument('--lrate', required=False, default=0.001, type=float, help='learning rate')
+    parser.add_argument('--epochs', required=False, default=100, type=int,
+                        help='maximum total training epochs')
     parser.add_argument('--use_aug', dest='aug', action='store_true')
-    parser.set_defaults(aug=False)
+    parser.add_argument('--early_stop_patience', required=False, default=10, type=int,
+                        help='stop after this many epochs without val improvement')
+    parser.add_argument('--early_stop_min_delta', required=False, default=0.001, type=float,
+                        help='minimum val improvement to reset early stopping')
+    parser.add_argument('--disable_early_stop', dest='early_stop', action='store_false',
+                        help='disable early stopping callback')
+    parser.set_defaults(aug=False, early_stop=True)
     parser.add_argument('--use_transplants', required=False, default=None, help='Path to transplanted dataset')
     parser.add_argument('--class_map', required=True, metavar="/path/file.csv", help=' Target classes')
 
@@ -266,6 +274,10 @@ if __name__ == '__main__':
             MINI_MASK_SHAPE = (512, 512)
             NUM_CLASSES = nr_classes
             LEARNING_RATE = args.lrate
+            TRAIN_EARLY_STOP_ENABLED = args.early_stop
+            TRAIN_EARLY_STOP_PATIENCE = max(1, args.early_stop_patience)
+            TRAIN_EARLY_STOP_MIN_DELTA = max(0.0, args.early_stop_min_delta)
+            TRAIN_EARLY_STOP_RESTORE_BEST_WEIGHTS = True
         config = TacoTrainConfig()
     else:
         class TacoTestConfig(Config):
@@ -358,6 +370,10 @@ if __name__ == '__main__':
             'use_augmentation': args.aug,
             'use_transplants': args.use_transplants != None,
             'learning_rate': config.LEARNING_RATE,
+            'max_epochs': max(1, args.epochs),
+            'early_stop_enabled': config.TRAIN_EARLY_STOP_ENABLED,
+            'early_stop_patience': config.TRAIN_EARLY_STOP_PATIENCE,
+            'early_stop_min_delta': config.TRAIN_EARLY_STOP_MIN_DELTA,
             'layers_trained': 'all'}
 
         subdir = os.path.dirname(model.log_dir)
@@ -372,7 +388,7 @@ if __name__ == '__main__':
             f.write(json.dumps(training_meta))
 
         # Training all layers
-        model.train(dataset_train, dataset_val,learning_rate=config.LEARNING_RATE, epochs=100,
+        model.train(dataset_train, dataset_val,learning_rate=config.LEARNING_RATE, epochs=max(1, args.epochs),
                     layers='all', augmentation=augmentation_pipeline)
 
         # Training last layers

@@ -722,7 +722,7 @@ def refine_detections_graph(rois, probs, deltas, window, config):
     # Class IDs per ROI
     class_ids = tf.argmax(probs, axis=1, output_type=tf.int32)
     # Class probability of the top class of each ROI
-    indices = tf.stack([tf.range(probs.shape[0]), class_ids], axis=1)
+    indices = tf.stack([tf.range(tf.shape(probs)[0]), class_ids], axis=1)
     class_scores = tf.gather_nd(probs, indices)
     class_ratio_scores = tf.math.divide(class_scores,(probs[:,0]+0.0001))
     # Class-specific bounding box deltas
@@ -2525,6 +2525,14 @@ class MaskRCNN():
         save_epoch_checkpoints = bool(getattr(self.config, "TRAIN_CHECKPOINT_SAVE_EACH_EPOCH", True))
         save_latest_checkpoint = bool(getattr(self.config, "TRAIN_CHECKPOINT_SAVE_LATEST", True))
         save_best_checkpoint = bool(getattr(self.config, "TRAIN_CHECKPOINT_SAVE_BEST", True))
+        enable_early_stopping = bool(getattr(self.config, "TRAIN_EARLY_STOP_ENABLED", False))
+        early_stop_patience = max(1, int(getattr(self.config, "TRAIN_EARLY_STOP_PATIENCE", 10)))
+        early_stop_min_delta = max(0.0, float(getattr(self.config, "TRAIN_EARLY_STOP_MIN_DELTA", 0.0)))
+        early_stop_restore_best_weights = bool(getattr(
+            self.config,
+            "TRAIN_EARLY_STOP_RESTORE_BEST_WEIGHTS",
+            True,
+        ))
 
         # Callbacks
         callbacks = [keras.callbacks.TensorBoard(log_dir=self.log_dir,
@@ -2553,6 +2561,15 @@ class MaskRCNN():
                 save_weights_only=True,
                 save_freq="epoch",
             ))
+        if enable_early_stopping:
+            callbacks.append(keras.callbacks.EarlyStopping(
+                monitor=checkpoint_monitor,
+                mode=checkpoint_mode,
+                patience=early_stop_patience,
+                min_delta=early_stop_min_delta,
+                restore_best_weights=early_stop_restore_best_weights,
+                verbose=1,
+            ))
 
         # Train
         log("\nStarting at epoch {}. LR={}\n".format(self.epoch, learning_rate))
@@ -2562,6 +2579,15 @@ class MaskRCNN():
             log("Checkpoint Path (latest): {}".format(self.checkpoint_latest_path))
         if save_best_checkpoint:
             log("Checkpoint Path (best): {}".format(self.checkpoint_best_path))
+        if enable_early_stopping:
+            log("Early stopping: monitor={}, mode={}, patience={}, min_delta={}, restore_best_weights={}"
+                .format(
+                    checkpoint_monitor,
+                    checkpoint_mode,
+                    early_stop_patience,
+                    early_stop_min_delta,
+                    early_stop_restore_best_weights,
+                ))
         self.set_trainable(layers)
         self.compile(learning_rate, self.config.LEARNING_MOMENTUM)
 
