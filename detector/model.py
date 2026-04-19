@@ -1894,7 +1894,13 @@ def data_generator(dataset, config, shuffle=True, augmentation=None,
                         outputs.extend(
                             [batch_mrcnn_class_ids, batch_mrcnn_bbox, batch_mrcnn_mask])
 
-                yield inputs, outputs
+                # Newer Keras expects matching output/target structures.
+                # For the normal training path we optimize via add_loss(),
+                # so there are no explicit y targets and we should emit x only.
+                if outputs:
+                    yield inputs, outputs
+                else:
+                    yield inputs
 
                 # start a new batch
                 b = 0
